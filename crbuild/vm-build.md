@@ -5,6 +5,9 @@ build. Chromium's build process is a bit fussy, and the Android target is even
 more fussy, so the least painful way of getting it done is to set up a VM with
 the exact software that the build process was designed for.
 
+In case you already have an Ubuntu running locally, and you have no need to run in a VM: you can directly skip to step 9.
+There are also a couple of local-*.sh files available which removed the need to login a VM.
+
 This document contains step-by-step instructions for setting up the build VM
 and building the files used in this library.
 
@@ -115,9 +118,17 @@ symlinked into `~/chromium`. The source code can be moved around, as long as
 the symlink is updated.
 
 If you want to build the LKGR (Last Known Good Revision) of Chromium. You need to specify this in the .glient file:
-For e.g. the ~/chromium/.gclient file looks something like this;
+For e.g. the ~/chromium/.gclient file might looks something like this;
 ```
-solutions = [{u'managed': False, u'name': u'src', u'url': u'https://chromium.googlesource.com/chromium/src.git', u'custom_deps': {}, u'deps_file': u'.DEPS.git', u'safesync_url': u'https://chromium-status.appspot.com/git-lkgr'}]https://chromium-status.appspot.com/git-lkgr
+solutions = [{
+   u'managed': False, 
+   u'name': u'src', 
+   u'url': u'https://chromium.googlesource.com/chromium/src.git', 
+   u'custom_deps': {}, 
+   u'deps_file': 
+   u'.DEPS.git', 
+   u'safesync_url': u'https://chromium-status.appspot.com/git-lkgr'
+}]
 ```
 
 ## Building
