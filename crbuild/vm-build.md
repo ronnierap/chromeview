@@ -114,6 +114,11 @@ If this is the first time the Chromium source code is downloaded and
 symlinked into `~/chromium`. The source code can be moved around, as long as
 the symlink is updated.
 
+If you want to build the LKGR (Last Known Good Revision) of Chromium. You need to specify this in the .glient file:
+For e.g. the ~/chromium/.gclient file looks something like this;
+```
+solutions = [{u'managed': False, u'name': u'src', u'url': u'https://chromium.googlesource.com/chromium/src.git', u'custom_deps': {}, u'deps_file': u'.DEPS.git', u'safesync_url': u'https://chromium-status.appspot.com/git-lkgr'}]https://chromium-status.appspot.com/git-lkgr
+```
 
 ## Building
 
