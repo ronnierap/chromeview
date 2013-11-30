@@ -11,6 +11,8 @@ cd ~/chromium/
 gclient sync --jobs 16
 cd ~/chromium/src
 
+#TODO Add check for JAVA_HOME set and Java on path; if not set, building on the ninja command will fail
+
 echo "check if ~/.build_arm is set (enabled)"
 if [ -f ~/.build_arm ] ; then
   . build/android/envsetup.sh --target-arch=arm
