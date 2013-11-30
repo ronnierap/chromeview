@@ -5,6 +5,7 @@ set -o errexit  # Stop the script on the first error.
 set -o nounset  # Catch un-initialized variables.
 
 # Enable password-less sudo for the current user.
+#TODO FIXME need to have a minimal impact on system security. This can be done for a moment, but must revert to original situation when done offcourse
 sudo sh -c "echo '$USER ALL=(ALL:ALL) NOPASSWD: ALL' > /etc/sudoers.d/$USER"
 #sudo chmod 0440 /etc/sudoers.d/crbuild
 
