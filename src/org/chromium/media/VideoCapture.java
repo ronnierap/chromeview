@@ -39,6 +39,7 @@ public class VideoCapture implements PreviewCallback, OnFrameAvailableListener {
     private static class DeviceImageFormatHack {
         private static final String[] sBUGGY_DEVICE_LIST = {
             "SAMSUNG-SGH-I747",
+            "ODROID-U2",
         };
 
         static int getImageFormat() {
@@ -51,7 +52,6 @@ public class VideoCapture implements PreviewCallback, OnFrameAvailableListener {
                     return ImageFormat.NV21;
                 }
             }
-
             return ImageFormat.YV12;
         }
     }
@@ -68,7 +68,7 @@ public class VideoCapture implements PreviewCallback, OnFrameAvailableListener {
     private int mExpectedFrameSize = 0;
     private int mId = 0;
     // Native callback context variable.
-    private int mNativeVideoCaptureDeviceAndroid = 0;
+    private long mNativeVideoCaptureDeviceAndroid = 0;
     private int[] mGlTextures = null;
     private SurfaceTexture mSurfaceTexture = null;
     private static final int GL_TEXTURE_EXTERNAL_OES = 0x8D65;
@@ -82,12 +82,12 @@ public class VideoCapture implements PreviewCallback, OnFrameAvailableListener {
 
     @CalledByNative
     public static VideoCapture createVideoCapture(
-            Context context, int id, int nativeVideoCaptureDeviceAndroid) {
+            Context context, int id, long nativeVideoCaptureDeviceAndroid) {
         return new VideoCapture(context, id, nativeVideoCaptureDeviceAndroid);
     }
 
     public VideoCapture(
-            Context context, int id, int nativeVideoCaptureDeviceAndroid) {
+            Context context, int id, long nativeVideoCaptureDeviceAndroid) {
         mContext = context;
         mId = id;
         mNativeVideoCaptureDeviceAndroid = nativeVideoCaptureDeviceAndroid;
@@ -100,6 +100,12 @@ public class VideoCapture implements PreviewCallback, OnFrameAvailableListener {
               ", height=" + height + ", frameRate=" + frameRate);
         try {
             mCamera = Camera.open(mId);
+        } catch (RuntimeException ex) {
+            Log.e(TAG, "allocate:Camera.open: " + ex);
+            return false;
+        }
+
+        try {
             Camera.CameraInfo camera_info = new Camera.CameraInfo();
             Camera.getCameraInfo(mId, camera_info);
             mCameraOrientation = camera_info.orientation;
@@ -113,7 +119,7 @@ public class VideoCapture implements PreviewCallback, OnFrameAvailableListener {
 
             // Calculate fps.
             List<int[]> listFpsRange = parameters.getSupportedPreviewFpsRange();
-            if (listFpsRange.size() == 0) {
+            if (listFpsRange == null || listFpsRange.size() == 0) {
                 Log.e(TAG, "allocate: no fps range found");
                 return false;
             }
@@ -175,6 +181,14 @@ public class VideoCapture implements PreviewCallback, OnFrameAvailableListener {
 
             calculateImageFormat(matchedWidth, matchedHeight);
 
+            if (parameters.isVideoStabilizationSupported()){
+                Log.d(TAG, "Image stabilization supported, currently: "
+                      + parameters.getVideoStabilization() + ", setting it.");
+                parameters.setVideoStabilization(true);
+            } else {
+                Log.d(TAG, "Image stabilization not supported.");
+            }
+
             parameters.setPreviewSize(matchedWidth, matchedHeight);
             parameters.setPreviewFormat(mImageFormat);
             parameters.setPreviewFpsRange(fpsMin, fpsMax);
@@ -229,6 +243,27 @@ public class VideoCapture implements PreviewCallback, OnFrameAvailableListener {
     @CalledByNative
     public int queryFrameRate() {
         return mCurrentCapability.mDesiredFps;
+    }
+
+    @CalledByNative
+    public int getColorspace() {
+        switch (mImageFormat){
+        case ImageFormat.YV12:
+            return AndroidImageFormatList.ANDROID_IMAGEFORMAT_YV12;
+        case ImageFormat.NV21:
+            return AndroidImageFormatList.ANDROID_IMAGEFORMAT_NV21;
+        case ImageFormat.YUY2:
+            return AndroidImageFormatList.ANDROID_IMAGEFORMAT_YUY2;
+        case ImageFormat.NV16:
+            return AndroidImageFormatList.ANDROID_IMAGEFORMAT_NV16;
+        case ImageFormat.JPEG:
+            return AndroidImageFormatList.ANDROID_IMAGEFORMAT_JPEG;
+        case ImageFormat.RGB_565:
+            return AndroidImageFormatList.ANDROID_IMAGEFORMAT_RGB_565;
+        case ImageFormat.UNKNOWN:
+        default:
+            return AndroidImageFormatList.ANDROID_IMAGEFORMAT_UNKNOWN;
+        }
     }
 
     @CalledByNative
@@ -319,9 +354,6 @@ public class VideoCapture implements PreviewCallback, OnFrameAvailableListener {
                 } else {
                     rotation = (mCameraOrientation - rotation + 360) % 360;
                 }
-                if (mImageFormat == ImageFormat.NV21) {
-                    convertNV21ToYV12(data);
-                }
                 nativeOnFrameAvailable(mNativeVideoCaptureDeviceAndroid,
                         data, mExpectedFrameSize,
                         rotation, flipVertical, flipHorizontal);
@@ -378,7 +410,7 @@ public class VideoCapture implements PreviewCallback, OnFrameAvailableListener {
     }
 
     private native void nativeOnFrameAvailable(
-            int nativeVideoCaptureDeviceAndroid,
+            long nativeVideoCaptureDeviceAndroid,
             byte[] data,
             int length,
             int rotation,
@@ -411,19 +443,5 @@ public class VideoCapture implements PreviewCallback, OnFrameAvailableListener {
 
     private void calculateImageFormat(int width, int height) {
         mImageFormat = DeviceImageFormatHack.getImageFormat();
-        if (mImageFormat == ImageFormat.NV21) {
-            mColorPlane = new byte[width * height / 4];
-        }
-    }
-
-    private void convertNV21ToYV12(byte[] data) {
-        final int ySize = mCurrentCapability.mWidth * mCurrentCapability.mHeight;
-        final int uvSize = ySize / 4;
-        for (int i = 0; i < uvSize; i++) {
-            final int index = ySize + i * 2;
-            data[ySize + i] = data[index];
-            mColorPlane[i] = data[index + 1];
-        }
-        System.arraycopy(mColorPlane, 0, data, ySize + uvSize, uvSize);
     }
 }

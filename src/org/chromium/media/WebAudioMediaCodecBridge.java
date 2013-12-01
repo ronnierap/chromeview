@@ -21,7 +21,6 @@ import org.chromium.base.JNINamespace;
 
 @JNINamespace("media")
 class WebAudioMediaCodecBridge {
-    private static final boolean DEBUG = true;
     static final String LOG_TAG = "WebAudioMediaCodec";
     // TODO(rtoy): What is the correct timeout value for reading
     // from a file in memory?
@@ -35,7 +34,7 @@ class WebAudioMediaCodecBridge {
 
     @CalledByNative
     private static boolean decodeAudioFile(Context ctx,
-                                           int nativeMediaCodecBridge,
+                                           long nativeMediaCodecBridge,
                                            int inputFD,
                                            long dataSize) {
 
@@ -61,7 +60,14 @@ class WebAudioMediaCodecBridge {
 
         MediaFormat format = extractor.getTrackFormat(0);
 
-        int channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+        // Number of channels specified in the file
+        int inputChannelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+
+        // Number of channels the decoder will provide. (Not
+        // necessarily the same as inputChannelCount.  See
+        // crbug.com/266006.)
+        int outputChannelCount = inputChannelCount;
+
         int sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE);
         String mime = format.getString(MediaFormat.KEY_MIME);
 
@@ -74,18 +80,8 @@ class WebAudioMediaCodecBridge {
             }
         }
 
-        if (DEBUG) {
-            Log.d(LOG_TAG, "Tracks: " + extractor.getTrackCount()
-                  + " Rate: " + sampleRate
-                  + " Channels: " + channelCount
-                  + " Mime: " + mime
-                  + " Duration: " + durationMicroseconds + " microsec");
-        }
-
-        nativeInitializeDestination(nativeMediaCodecBridge,
-                                    channelCount,
-                                    sampleRate,
-                                    durationMicroseconds);
+        Log.d(LOG_TAG, "Initial: Tracks: " + extractor.getTrackCount() +
+              " Format: " + format);
 
         // Create decoder
         MediaCodec codec = MediaCodec.createDecoderByType(mime);
@@ -100,6 +96,7 @@ class WebAudioMediaCodecBridge {
 
         boolean sawInputEOS = false;
         boolean sawOutputEOS = false;
+        boolean destinationInitialized = false;
 
         // Keep processing until the output is done.
         while (!sawOutputEOS) {
@@ -138,8 +135,26 @@ class WebAudioMediaCodecBridge {
             if (outputBufIndex >= 0) {
                 ByteBuffer buf = codecOutputBuffers[outputBufIndex];
 
-                if (info.size > 0) {
-                    nativeOnChunkDecoded(nativeMediaCodecBridge, buf, info.size);
+                if (!destinationInitialized) {
+                    // Initialize the destination as late as possible to
+                    // catch any changes in format. But be sure to
+                    // initialize it BEFORE we send any decoded audio,
+                    // and only initialize once.
+                    Log.d(LOG_TAG, "Final:  Rate: " + sampleRate +
+                          " Channels: " + inputChannelCount +
+                          " Mime: " + mime +
+                          " Duration: " + durationMicroseconds + " microsec");
+
+                    nativeInitializeDestination(nativeMediaCodecBridge,
+                                                inputChannelCount,
+                                                sampleRate,
+                                                durationMicroseconds);
+                    destinationInitialized = true;
+                }
+
+                if (destinationInitialized && info.size > 0) {
+                    nativeOnChunkDecoded(nativeMediaCodecBridge, buf, info.size,
+                                         inputChannelCount, outputChannelCount);
                 }
 
                 buf.clear();
@@ -150,6 +165,11 @@ class WebAudioMediaCodecBridge {
                 }
             } else if (outputBufIndex == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED) {
                 codecOutputBuffers = codec.getOutputBuffers();
+            } else if (outputBufIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                MediaFormat newFormat = codec.getOutputFormat();
+                outputChannelCount = newFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+                sampleRate = newFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE);
+                Log.d(LOG_TAG, "output format changed to " + newFormat);
             }
         }
 
@@ -163,11 +183,12 @@ class WebAudioMediaCodecBridge {
     }
 
     private static native void nativeOnChunkDecoded(
-        int nativeWebAudioMediaCodecBridge, ByteBuffer buf, int size);
+        long nativeWebAudioMediaCodecBridge, ByteBuffer buf, int size,
+        int inputChannelCount, int outputChannelCount);
 
     private static native void nativeInitializeDestination(
-        int nativeWebAudioMediaCodecBridge,
-        int channelCount,
+        long nativeWebAudioMediaCodecBridge,
+        int inputChannelCount,
         int sampleRate,
         long durationMicroseconds);
 }

@@ -43,13 +43,6 @@ public class ContentViewClient {
     }
 
     /**
-      * Lets client listen on the scaling changes on delayed, throttled
-      * and best-effort basis. Used for WebView.onScaleChanged.
-      */
-    public void onScaleChanged(float oldScale, float newScale) {
-    }
-
-    /**
      * Notifies the client that the position of the top controls has changed.
      * @param topControlsOffsetYPix The Y offset of the top controls in physical pixels.
      * @param contentOffsetYPix The Y offset of the content in physical pixels.
@@ -57,15 +50,6 @@ public class ContentViewClient {
      */
     public void onOffsetsForFullscreenChanged(
             float topControlsOffsetYPix, float contentOffsetYPix, float overdrawBottomHeightPix) {
-    }
-
-    /**
-     * Notifies the client that the renderer backing the ContentView has crashed.
-     * @param crashedWhileOomProtected True iff the renderer died while being bound with a high
-     * priority binding, which indicates that it was probably an actual crash (as opposed to the
-     * renderer being killed by the OS out-of-memory killer).
-     */
-    public void onRendererCrash(boolean processWasOomProtected) {
     }
 
     public boolean shouldOverrideKeyEvent(KeyEvent event) {
@@ -103,8 +87,10 @@ public class ContentViewClient {
         return false;
     }
 
-    // Called when an ImeEvent is sent to the page. Can be used to know when some text is entered
-    // in a page.
+    /**
+     * Called when an ImeEvent is sent to the page. Can be used to know when some text is entered
+     * in a page.
+     */
     public void onImeEvent() {
     }
 
@@ -117,7 +103,7 @@ public class ContentViewClient {
     public void onImeStateChangeRequested(boolean requestShow) {
     }
 
-    // TODO (dtrainor): Should expose getScrollX/Y from ContentView or make
+    // TODO(dtrainor): Should expose getScrollX/Y from ContentView or make
     // computeHorizontalScrollOffset()/computeVerticalScrollOffset() public.
     /**
      * Gives the UI the chance to override each scroll event.
@@ -152,6 +138,24 @@ public class ContentViewClient {
     }
 
     /**
+     * Perform a search on {@code searchQuery}.  This method is only called if
+     * {@link #doesPerformWebSearch()} returns {@code true}.
+     * @param searchQuery The string to search for.
+     */
+    public void performWebSearch(String searchQuery) {
+    }
+
+    /**
+     * If this returns {@code true} contextual web search attempts will be forwarded to
+     * {@link #performWebSearch(String)}.
+     * @return {@code true} iff this {@link ContentViewClient} wants to consume web search queries
+     *         and override the default intent behavior.
+     */
+    public boolean doesPerformWebSearch() {
+        return false;
+    }
+
+    /**
      * Called when a new content intent is requested to be started.
      */
     public void onStartContentIntent(Context context, String intentUrl) {
@@ -179,5 +183,14 @@ public class ContentViewClient {
 
     public ContentVideoViewClient getContentVideoViewClient() {
         return null;
+    }
+
+    /**
+     * Called when BrowserMediaPlayerManager wants to load a media resource.
+     * @param url the URL of media resource to load.
+     * @return true to prevent the resource from being loaded.
+     */
+    public boolean shouldBlockMediaRequest(String url) {
+        return false;
     }
 }

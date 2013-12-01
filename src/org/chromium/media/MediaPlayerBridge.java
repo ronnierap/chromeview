@@ -50,8 +50,14 @@ public class MediaPlayerBridge {
     }
 
     @CalledByNative
-    protected void prepareAsync() throws IllegalStateException {
-        getLocalPlayer().prepareAsync();
+    protected boolean prepareAsync() {
+        try {
+            getLocalPlayer().prepareAsync();
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "Unable to prepare MediaPlayer.", e);
+            return false;
+        }
+        return true;
     }
 
     @CalledByNative
@@ -145,12 +151,12 @@ public class MediaPlayerBridge {
         getLocalPlayer().setOnVideoSizeChangedListener(listener);
     }
 
-    private static class AllowedOperations {
+    protected static class AllowedOperations {
         private final boolean mCanPause;
         private final boolean mCanSeekForward;
         private final boolean mCanSeekBackward;
 
-        private AllowedOperations(boolean canPause, boolean canSeekForward,
+        public AllowedOperations(boolean canPause, boolean canSeekForward,
                 boolean canSeekBackward) {
             mCanPause = canPause;
             mCanSeekForward = canSeekForward;
@@ -172,7 +178,8 @@ public class MediaPlayerBridge {
      * allowed on the media player.
      */
     @CalledByNative
-    private static AllowedOperations getAllowedOperations(MediaPlayer player) {
+    protected AllowedOperations getAllowedOperations() {
+        MediaPlayer player = getLocalPlayer();
         boolean canPause = true;
         boolean canSeekForward = true;
         boolean canSeekBackward = true;

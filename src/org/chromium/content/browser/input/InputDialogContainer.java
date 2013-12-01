@@ -6,33 +6,28 @@ package org.chromium.content.browser.input;
 
 import android.app.AlertDialog;
 import android.app.DatePickerDialog;
-import android.app.TimePickerDialog;
 import android.app.DatePickerDialog.OnDateSetListener;
 import android.app.TimePickerDialog.OnTimeSetListener;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.DialogInterface.OnDismissListener;
-import android.text.TextUtils;
 import android.text.format.DateFormat;
 import android.text.format.Time;
 import android.widget.DatePicker;
 import android.widget.TimePicker;
 
-import org.chromium.content.browser.input.DateTimePickerDialog.OnDateTimeSetListener;
-import org.chromium.content.browser.input.TwoFieldDatePickerDialog;
 import org.chromium.content.R;
+import org.chromium.content.browser.input.DateTimePickerDialog.OnDateTimeSetListener;
+import org.chromium.content.browser.input.MultiFieldTimePickerDialog.OnMultiFieldTimeSetListener;
 
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
 import java.util.Calendar;
-import java.util.Date;
 
 public class InputDialogContainer {
 
     interface InputActionDelegate {
         void cancelDateTimeDialog();
         void replaceDateTime(int dialogType,
-                int year, int month, int day, int hour, int minute, int second, int week);
+            int year, int month, int day, int hour, int minute, int second, int milli, int week);
     }
 
     // Default values used in Time representations of selected date/time before formatting.
@@ -61,13 +56,13 @@ public class InputDialogContainer {
     private static int sTextInputTypeTime;
     private static int sTextInputTypeWeek;
 
-    private Context mContext;
+    private final Context mContext;
 
     // Prevents sending two notifications (from onClick and from onDismiss)
     private boolean mDialogAlreadyDismissed;
 
     private AlertDialog mDialog;
-    private InputActionDelegate mInputActionDelegate;
+    private final InputActionDelegate mInputActionDelegate;
 
     static void initializeInputTypes(int textInputTypeDate,
             int textInputTypeDateTime, int textInputTypeDateTimeLocal,
@@ -93,7 +88,7 @@ public class InputDialogContainer {
     }
 
     private Time normalizeTime(int year, int month, int monthDay,
-            int hour, int minute, int second)  {
+                               int hour, int minute, int second) {
         Time result = new Time();
         if (year == 0 && month == 0 && monthDay == 0 && hour == 0 &&
                 minute == 0 && second == 0) {
@@ -108,7 +103,8 @@ public class InputDialogContainer {
     }
 
     void showDialog(final int dialogType, int year, int month, int monthDay,
-            int hour, int minute, int second, int week, double min, double max) {
+                    int hour, int minute, int second, int milli, int week,
+                    double min, double max, double step) {
         if (isDialogShowing()) mDialog.dismiss();
 
         // Java Date dialogs like longs but Blink prefers doubles..
@@ -118,7 +114,12 @@ public class InputDialogContainer {
         // In any case the cast here is safe given the above restrictions.
         long minTime = (long) min;
         long maxTime = (long) max;
+        int stepTime = (int) step;
 
+        if (milli > 1000) {
+            second += milli / 1000;
+            milli %= 1000;
+        }
         Time time = normalizeTime(year, month, monthDay, hour, minute, second);
         if (dialogType == sTextInputTypeDate) {
             DatePickerDialog dialog = new DatePickerDialog(mContext,
@@ -129,9 +130,12 @@ public class InputDialogContainer {
             dialog.setTitle(mContext.getText(R.string.date_picker_dialog_title));
             mDialog = dialog;
         } else if (dialogType == sTextInputTypeTime) {
-            mDialog = TimeDialog.create(mContext, new TimeListener(dialogType),
-                    time.hour, time.minute, DateFormat.is24HourFormat(mContext),
-                    minTime, maxTime);
+            mDialog = new MultiFieldTimePickerDialog(
+                mContext, 0 /* theme */ ,
+                time.hour, time.minute, time.second, milli,
+                (int) minTime, (int) maxTime, stepTime,
+                DateFormat.is24HourFormat(mContext),
+                new FullTimeListener(dialogType));
         } else if (dialogType == sTextInputTypeDateTime ||
                 dialogType == sTextInputTypeDateTimeLocal) {
             mDialog = new DateTimePickerDialog(mContext,
@@ -158,13 +162,7 @@ public class InputDialogContainer {
 
         mDialog.setButton(DialogInterface.BUTTON_NEGATIVE,
                 mContext.getText(android.R.string.cancel),
-                new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        mDialogAlreadyDismissed = true;
-                        mInputActionDelegate.cancelDateTimeDialog();
-                    }
-                });
+                (DialogInterface.OnClickListener) null);
 
         mDialog.setButton(DialogInterface.BUTTON_NEUTRAL,
                 mContext.getText(R.string.date_picker_dialog_clear),
@@ -172,7 +170,18 @@ public class InputDialogContainer {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
                         mDialogAlreadyDismissed = true;
-                        mInputActionDelegate.replaceDateTime(dialogType, 0, 0, 0, 0, 0, 0, 0);
+                        mInputActionDelegate.replaceDateTime(dialogType, 0, 0, 0, 0, 0, 0, 0, 0);
+                    }
+                });
+
+        mDialog.setOnDismissListener(
+                new OnDismissListener() {
+                    @Override
+                    public void onDismiss(final DialogInterface dialog) {
+                        if (!mDialogAlreadyDismissed) {
+                            mDialogAlreadyDismissed = true;
+                            mInputActionDelegate.cancelDateTimeDialog();
+                        }
                     }
                 });
 
@@ -219,6 +228,22 @@ public class InputDialogContainer {
                 setFieldDateTimeValue(mDialogType,
                         YEAR_DEFAULT, MONTH_DEFAULT, MONTHDAY_DEFAULT,
                         hourOfDay, minute, WEEK_DEFAULT, HTML_TIME_FORMAT);
+            }
+        }
+    }
+
+    private class FullTimeListener implements OnMultiFieldTimeSetListener {
+        private final int mDialogType;
+        FullTimeListener(int dialogType) {
+            mDialogType = dialogType;
+        }
+
+        @Override
+        public void onTimeSet(int hourOfDay, int minute, int second, int milli) {
+            if (!mDialogAlreadyDismissed) {
+                setFieldDateTimeValue(mDialogType,
+                        YEAR_DEFAULT, MONTH_DEFAULT, MONTHDAY_DEFAULT,
+                        hourOfDay, minute, second, milli, WEEK_DEFAULT, HTML_TIME_FORMAT);
             }
         }
     }
@@ -274,6 +299,17 @@ public class InputDialogContainer {
         mDialogAlreadyDismissed = true;
 
         mInputActionDelegate.replaceDateTime(dialogType,
-                year, month, monthDay, hourOfDay, minute, 0 /* second */, week);
+            year, month, monthDay, hourOfDay, minute, 0 /* second */, 0 /* milli */, week);
+    }
+
+    private void setFieldDateTimeValue(int dialogType,
+            int year, int month, int monthDay, int hourOfDay,
+            int minute, int second, int milli, int week, String dateFormat) {
+        // Prevents more than one callback being sent to the native
+        // side when the dialog triggers multiple events.
+        mDialogAlreadyDismissed = true;
+
+        mInputActionDelegate.replaceDateTime(
+            dialogType, year, month, monthDay, hourOfDay, minute, second, milli, week);
     }
 }

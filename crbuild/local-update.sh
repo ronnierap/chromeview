@@ -18,7 +18,7 @@ rm -rf src/org/chromium/*
 #cp -r ~/chromium/src/content/shell_apk/android/java/res/* res
 
 # android_webview
-scp $BLD:chromium/src/out/Release/android_webview_apk/assets/*.pak assets
+cp -r ~/chromium/src/out/Release/android_webview_apk/assets/*.pak assets
 cp -r ~/chromium/src/out/Release/android_webview_apk/libs/* libs
 rm libs/**/gdbserver
 cp -r ~/chromium/src/android_webview/java/src/* src/

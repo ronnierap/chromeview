@@ -6,17 +6,17 @@ package org.chromium.content.browser.input;
 
 import android.content.Context;
 
+import org.chromium.content.R;
+
 import java.text.DateFormatSymbols;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Locale;
 
-import org.chromium.content.R;
-
 public class MonthPicker extends TwoFieldDatePicker {
     private static final int MONTHS_NUMBER = 12;
 
-    private String[] mShortMonths;
+    private final String[] mShortMonths;
 
     public MonthPicker(Context context, long minValue, long maxValue) {
         super(context, minValue, maxValue);
@@ -35,7 +35,7 @@ public class MonthPicker extends TwoFieldDatePicker {
 
     @Override
     protected Calendar createDateFromValue(long value) {
-        int year = (int)Math.min(value / 12 + 1970, Integer.MAX_VALUE);
+        int year = (int) Math.min(value / 12 + 1970, Integer.MAX_VALUE);
         int month = (int) (value % 12);
         Calendar cal = Calendar.getInstance();
         cal.clear();
@@ -92,16 +92,16 @@ public class MonthPicker extends TwoFieldDatePicker {
 
 
     @Override
-    protected int getMaxPositionInYear() {
-        if (getYear() == getMaxDate().get(Calendar.YEAR)) {
+    protected int getMaxPositionInYear(int year) {
+        if (year == getMaxDate().get(Calendar.YEAR)) {
             return getMaxDate().get(Calendar.MONTH);
         }
         return MONTHS_NUMBER - 1;
     }
 
     @Override
-    protected int getMinPositionInYear() {
-        if (getYear() == getMinDate().get(Calendar.YEAR)) {
+    protected int getMinPositionInYear(int year) {
+        if (year == getMinDate().get(Calendar.YEAR)) {
             return getMinDate().get(Calendar.MONTH);
         }
         return 0;

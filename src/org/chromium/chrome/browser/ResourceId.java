@@ -14,6 +14,8 @@ public class ResourceId {
 0,
 
 
+R.drawable.infobar_protected_media_identifier,
+
 R.drawable.infobar_geolocation,
 R.drawable.infobar_didyoumean,
 R.drawable.infobar_autofill,
@@ -34,9 +36,10 @@ R.drawable.infobar_savepassword,
 R.drawable.infobar_warning,
 R.drawable.infobar_theme,
 R.drawable.infobar_translate,
+R.drawable.infobar_blocked_popups,
 
 
-R.drawable.controlled_setting_mandatory_large,
+R.drawable.pageinfo_enterprise_managed,
 
 R.drawable.pageinfo_bad,
 R.drawable.pageinfo_good,

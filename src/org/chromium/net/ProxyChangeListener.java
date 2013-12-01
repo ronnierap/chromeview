@@ -14,6 +14,9 @@ import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 import org.chromium.base.NativeClassQualifiedName;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+
 // This class partners with native ProxyConfigServiceAndroid to listen for
 // proxy change notifications from Android.
 @JNINamespace("net")
@@ -21,10 +24,19 @@ public class ProxyChangeListener {
     private static final String TAG = "ProxyChangeListener";
     private static boolean sEnabled = true;
 
-    private int mNativePtr;
+    private long mNativePtr;
     private Context mContext;
     private ProxyReceiver mProxyReceiver;
     private Delegate mDelegate;
+
+    private static class ProxyConfig {
+        public ProxyConfig(String host, int port) {
+            mHost = host;
+            mPort = port;
+        }
+        public final String mHost;
+        public final int mPort;
+    };
 
     public interface Delegate {
         public void proxySettingsChanged();
@@ -53,7 +65,7 @@ public class ProxyChangeListener {
     }
 
     @CalledByNative
-    public void start(int nativePtr) {
+    public void start(long nativePtr) {
         assert mNativePtr == 0;
         mNativePtr = nativePtr;
         registerReceiver();
@@ -69,12 +81,49 @@ public class ProxyChangeListener {
         @Override
         public void onReceive(Context context, Intent intent) {
             if (intent.getAction().equals(Proxy.PROXY_CHANGE_ACTION)) {
-                proxySettingsChanged();
+                proxySettingsChanged(extractNewProxy(intent));
+            }
+        }
+
+        // Extract a ProxyConfig object from the supplied Intent's extra data
+        // bundle. The android.net.ProxyProperties class is not exported from
+        // tne Android SDK, so we have to use reflection to get at it and invoke
+        // methods on it. If we fail, return an empty proxy config (meaning
+        // 'direct').
+        // TODO(ellyjones): once android.net.ProxyProperties is exported,
+        // rewrite this.
+        private ProxyConfig extractNewProxy(Intent intent) {
+            try {
+                final String CLASS_NAME = "android.net.ProxyProperties";
+                final String GET_HOST_NAME = "getHost";
+                final String GET_PORT_NAME = "getPort";
+                Object props = intent.getExtras().get("proxy");
+                if (props == null) {
+                    return null;
+                }
+                Class<?> cls = Class.forName(CLASS_NAME);
+                Method getHostMethod = cls.getDeclaredMethod(GET_HOST_NAME);
+                Method getPortMethod = cls.getDeclaredMethod(GET_PORT_NAME);
+
+                String host = (String)getHostMethod.invoke(props);
+                int port = (Integer)getPortMethod.invoke(props);
+
+                return new ProxyConfig(host, port);
+            } catch (ClassNotFoundException ex) {
+                return null;
+            } catch (NoSuchMethodException ex) {
+                return null;
+            } catch (IllegalAccessException ex) {
+                return null;
+            } catch (InvocationTargetException ex) {
+                return null;
+            } catch (NullPointerException ex) {
+                return null;
             }
         }
     }
 
-    private void proxySettingsChanged() {
+    private void proxySettingsChanged(ProxyConfig cfg) {
         if (!sEnabled) {
             return;
         }
@@ -86,7 +135,11 @@ public class ProxyChangeListener {
         }
         // Note that this code currently runs on a MESSAGE_LOOP_UI thread, but
         // the C++ code must run the callbacks on the network thread.
-        nativeProxySettingsChanged(mNativePtr);
+        if (cfg != null) {
+            nativeProxySettingsChangedTo(mNativePtr, cfg.mHost, cfg.mPort);
+        } else {
+            nativeProxySettingsChanged(mNativePtr);
+        }
     }
 
     private void registerReceiver() {
@@ -111,5 +164,9 @@ public class ProxyChangeListener {
      * See net/proxy/proxy_config_service_android.cc
      */
     @NativeClassQualifiedName("ProxyConfigServiceAndroid::JNIDelegate")
-    private native void nativeProxySettingsChanged(int nativePtr);
+    private native void nativeProxySettingsChangedTo(long nativePtr,
+                                                     String host,
+                                                     int port);
+    @NativeClassQualifiedName("ProxyConfigServiceAndroid::JNIDelegate")
+    private native void nativeProxySettingsChanged(long nativePtr);
 }

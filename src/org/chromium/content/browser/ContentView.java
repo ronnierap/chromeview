@@ -24,7 +24,7 @@ import android.widget.FrameLayout;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.chromium.content.common.TraceEvent;
-import org.chromium.ui.WindowAndroid;
+import org.chromium.ui.base.WindowAndroid;
 
 /**
  * The containing view for {@link ContentViewCore} that exists in the Android UI hierarchy and
@@ -40,6 +40,7 @@ public class ContentView extends FrameLayout
 
     private float mCurrentTouchOffsetX;
     private float mCurrentTouchOffsetY;
+    private final int[] mLocationInWindow = new int[2];
 
     /**
      * Creates an instance of a ContentView.
@@ -49,7 +50,7 @@ public class ContentView extends FrameLayout
      * @param windowAndroid An instance of the WindowAndroid.
      * @return A ContentView instance.
      */
-    public static ContentView newInstance(Context context, int nativeWebContents,
+    public static ContentView newInstance(Context context, long nativeWebContents,
             WindowAndroid windowAndroid) {
         return newInstance(context, nativeWebContents, windowAndroid, null,
                 android.R.attr.webViewStyle);
@@ -64,7 +65,7 @@ public class ContentView extends FrameLayout
      * @param attrs The attributes of the XML tag that is inflating the view.
      * @return A ContentView instance.
      */
-    public static ContentView newInstance(Context context, int nativeWebContents,
+    public static ContentView newInstance(Context context, long nativeWebContents,
             WindowAndroid windowAndroid, AttributeSet attrs) {
         // TODO(klobag): use the WebViewStyle as the default style for now. It enables scrollbar.
         // When ContentView is moved to framework, we can define its own style in the res.
@@ -82,7 +83,7 @@ public class ContentView extends FrameLayout
      * @param defStyle The default style to apply to this view.
      * @return A ContentView instance.
      */
-    public static ContentView newInstance(Context context, int nativeWebContents,
+    public static ContentView newInstance(Context context, long nativeWebContents,
             WindowAndroid windowAndroid, AttributeSet attrs, int defStyle) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN) {
             return new ContentView(context, nativeWebContents, windowAndroid, attrs, defStyle);
@@ -92,23 +93,30 @@ public class ContentView extends FrameLayout
         }
     }
 
-    protected ContentView(Context context, int nativeWebContents, WindowAndroid windowAndroid,
+    protected ContentView(Context context, long nativeWebContents, WindowAndroid windowAndroid,
             AttributeSet attrs, int defStyle) {
         super(context, attrs, defStyle);
 
+        if (getScrollBarStyle() == View.SCROLLBARS_INSIDE_OVERLAY) {
+            setHorizontalScrollBarEnabled(false);
+            setVerticalScrollBarEnabled(false);
+        }
+
+        setFocusable(true);
+        setFocusableInTouchMode(true);
+
         mContentViewCore = new ContentViewCore(context);
-        mContentViewCore.initialize(this, this, nativeWebContents, windowAndroid,
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN ?
-                ContentViewCore.INPUT_EVENTS_DELIVERED_AT_VSYNC :
-                ContentViewCore.INPUT_EVENTS_DELIVERED_IMMEDIATELY);
+        mContentViewCore.initialize(this, this, nativeWebContents, windowAndroid);
     }
 
-    // PageInfo implementation.
-
-    @Override
+    /**
+     * @return The URL of the page.
+     */
     public String getUrl() {
         return mContentViewCore.getUrl();
     }
+
+    // PageInfo implementation.
 
     @Override
     public String getTitle() {
@@ -117,7 +125,7 @@ public class ContentView extends FrameLayout
 
     @Override
     public boolean isReadyForSnapshot() {
-        return !isCrashed() && isReady();
+        return isReady();
     }
 
     @Override
@@ -266,22 +274,11 @@ public class ContentView extends FrameLayout
     }
 
     /**
-     * Reload the current page.
-     */
-    public void reload() {
-        mContentViewCore.reload();
-    }
-
-    /**
      * Clears the WebView's page history in both the backwards and forwards
      * directions.
      */
     public void clearHistory() {
         mContentViewCore.clearHistory();
-    }
-
-    String getSelectedText() {
-        return mContentViewCore.getSelectedText();
     }
 
     /**
@@ -314,10 +311,6 @@ public class ContentView extends FrameLayout
         mContentViewCore.getContentViewGestureHandler().fling(timeMs, x, y, velocityX, velocityY);
     }
 
-    void endFling(long timeMs) {
-        mContentViewCore.getContentViewGestureHandler().endFling(timeMs);
-    }
-
     /**
      * Start pinch zoom. You must call {@link #pinchEnd} to stop.
      */
@@ -336,6 +329,11 @@ public class ContentView extends FrameLayout
 
     void setIgnoreSingleTap(boolean value) {
         mContentViewCore.getContentViewGestureHandler().setIgnoreSingleTap(value);
+    }
+
+    /** @see ContentViewGestureHandler#setIgnoreRemainingTouchEvents */
+    public void setIgnoreRemainingTouchEvents() {
+        mContentViewCore.getContentViewGestureHandler().setIgnoreRemainingTouchEvents();
     }
 
     /**
@@ -362,20 +360,6 @@ public class ContentView extends FrameLayout
      */
     public void evaluateJavaScript(String script) throws IllegalStateException {
         mContentViewCore.evaluateJavaScript(script, null);
-    }
-
-    /**
-     * This method should be called when the containing activity is paused.
-     **/
-    public void onActivityPause() {
-        mContentViewCore.onActivityPause();
-    }
-
-    /**
-     * This method should be called when the containing activity is resumed.
-     **/
-    public void onActivityResume() {
-        mContentViewCore.onActivityResume();
     }
 
     /**
@@ -417,12 +401,27 @@ public class ContentView extends FrameLayout
         return super.drawChild(canvas, child, drawingTime);
     }
 
+    // Needed by ContentViewCore.InternalAccessDelegate
+    @Override
+    public void onScrollChanged(int l, int t, int oldl, int oldt) {
+        super.onScrollChanged(l, t, oldl, oldt);
+    }
+
     @Override
     protected void onSizeChanged(int w, int h, int ow, int oh) {
         TraceEvent.begin();
         super.onSizeChanged(w, h, ow, oh);
         mContentViewCore.onSizeChanged(w, h, ow, oh);
         TraceEvent.end();
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        super.onLayout(changed, left, top, right, bottom);
+        if (changed) {
+            getLocationInWindow(mLocationInWindow);
+            mContentViewCore.onLocationInWindowChanged(mLocationInWindow[0], mLocationInWindow[1]);
+        }
     }
 
     @Override
@@ -441,6 +440,12 @@ public class ContentView extends FrameLayout
         super.onFocusChanged(gainFocus, direction, previouslyFocusedRect);
         mContentViewCore.onFocusChanged(gainFocus);
         TraceEvent.end();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasWindowFocus) {
+        super.onWindowFocusChanged(hasWindowFocus);
+        mContentViewCore.onWindowFocusChanged(hasWindowFocus);
     }
 
     @Override
@@ -480,6 +485,7 @@ public class ContentView extends FrameLayout
         MotionEvent offset = createOffsetMotionEvent(event);
         boolean consumed = mContentViewCore.onHoverEvent(offset);
         offset.recycle();
+        super.onHoverEvent(event);
         return consumed;
     }
 
@@ -533,7 +539,7 @@ public class ContentView extends FrameLayout
 
     @Override
     protected int computeHorizontalScrollExtent() {
-        // TODO (dtrainor): Need to expose scroll events properly to public. Either make getScroll*
+        // TODO(dtrainor): Need to expose scroll events properly to public. Either make getScroll*
         // work or expose computeHorizontalScrollOffset()/computeVerticalScrollOffset as public.
         return mContentViewCore.computeHorizontalScrollExtent();
     }
@@ -643,42 +649,6 @@ public class ContentView extends FrameLayout
      */
     public void setUseDesktopUserAgent(boolean override, boolean reloadOnChange) {
         mContentViewCore.setUseDesktopUserAgent(override, reloadOnChange);
-    }
-
-    /**
-     * @return Whether the native ContentView has crashed.
-     */
-    public boolean isCrashed() {
-        return mContentViewCore.isCrashed();
-    }
-
-    /**
-     * @return Whether a reload happens when this ContentView is activated.
-     */
-    public boolean needsReload() {
-        return mContentViewCore.needsReload();
-    }
-
-    /**
-     * Checks whether the WebView can be zoomed in.
-     *
-     * @return True if the WebView can be zoomed in.
-     */
-    // This method uses the term 'zoom' for legacy reasons, but relates
-    // to what chrome calls the 'page scale factor'.
-    public boolean canZoomIn() {
-        return mContentViewCore.canZoomIn();
-    }
-
-    /**
-     * Checks whether the WebView can be zoomed out.
-     *
-     * @return True if the WebView can be zoomed out.
-     */
-    // This method uses the term 'zoom' for legacy reasons, but relates
-    // to what chrome calls the 'page scale factor'.
-    public boolean canZoomOut() {
-        return mContentViewCore.canZoomOut();
     }
 
     /**

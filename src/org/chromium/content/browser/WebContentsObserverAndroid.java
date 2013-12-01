@@ -13,10 +13,14 @@ import org.chromium.base.JNINamespace;
  */
 @JNINamespace("content")
 public abstract class WebContentsObserverAndroid {
-    private int mNativeWebContentsObserverAndroid;
+    private long mNativeWebContentsObserverAndroid;
 
     public WebContentsObserverAndroid(ContentViewCore contentViewCore) {
         mNativeWebContentsObserverAndroid = nativeInit(contentViewCore.getNativeContentViewCore());
+    }
+
+    @CalledByNative
+    public void renderProcessGone(boolean wasOomProtected) {
     }
 
     /**
@@ -113,10 +117,31 @@ public abstract class WebContentsObserverAndroid {
     }
 
     /**
+     * Notifies that a navigation entry has been committed.
+     */
+    @CalledByNative
+    public void navigationEntryCommitted() {
+    }
+
+    /**
      * Invoked when visible SSL state changes.
      */
     @CalledByNative
     public void didChangeVisibleSSLState() {
+    }
+
+    /**
+     * Called when an interstitial page gets attached to the tab content.
+     */
+    @CalledByNative
+    public void didAttachInterstitialPage() {
+    }
+
+    /**
+     * Called when an interstitial page gets detached from the tab content.
+     */
+    @CalledByNative
+    public void didDetachInterstitialPage() {
     }
 
     /**
@@ -130,6 +155,6 @@ public abstract class WebContentsObserverAndroid {
         }
     }
 
-    private native int nativeInit(int contentViewCorePtr);
-    private native void nativeDestroy(int nativeWebContentsObserverAndroid);
+    private native long nativeInit(long contentViewCorePtr);
+    private native void nativeDestroy(long nativeWebContentsObserverAndroid);
 }

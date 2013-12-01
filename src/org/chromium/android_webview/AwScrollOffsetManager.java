@@ -4,11 +4,10 @@
 
 package org.chromium.android_webview;
 
+import android.graphics.Rect;
 import android.widget.OverScroller;
 
 import com.google.common.annotations.VisibleForTesting;
-
-import org.chromium.base.CalledByNative;
 
 /**
  * Takes care of syncing the scroll offset between the Android View system and the
@@ -18,6 +17,15 @@ import org.chromium.base.CalledByNative;
  */
 @VisibleForTesting
 public class AwScrollOffsetManager {
+    // Values taken from WebViewClassic.
+
+    // The amount of content to overlap between two screens when using pageUp/pageDown methiods.
+    private static final int PAGE_SCROLL_OVERLAP = 24;
+    // Standard animated scroll speed.
+    private static final int STD_SCROLL_ANIMATION_SPEED_PIX_PER_SEC = 480;
+    // Time for the longest scroll animation.
+    private static final int MAX_SCROLL_ANIMATION_DURATION_MILLISEC = 750;
+
     // The unit of all the values in this delegate are physical pixels.
     public interface Delegate {
         // Call View#overScrollBy on the containerView.
@@ -42,9 +50,9 @@ public class AwScrollOffsetManager {
     private int mNativeScrollX;
     private int mNativeScrollY;
 
-    // Content size.
-    private int mContentWidth;
-    private int mContentHeight;
+    // How many pixels can we scroll in a given direction.
+    private int mMaxHorizontalScrollOffset;
+    private int mMaxVerticalScrollOffset;
 
     // Size of the container view.
     private int mContainerViewWidth;
@@ -53,8 +61,10 @@ public class AwScrollOffsetManager {
     // Whether we're in the middle of processing a touch event.
     private boolean mProcessingTouchEvent;
 
+    private boolean mFlinging;
+
     // Whether (and to what value) to update the native side scroll offset after we've finished
-    // provessing a touch event.
+    // processing a touch event.
     private boolean mApplyDeferredNativeScroll;
     private int mDeferredNativeScrollX;
     private int mDeferredNativeScrollY;
@@ -73,11 +83,11 @@ public class AwScrollOffsetManager {
     //----- Scroll range and extent calculation methods -------------------------------------------
 
     public int computeHorizontalScrollRange() {
-        return Math.max(mContainerViewWidth, mContentWidth);
+        return mContainerViewWidth + mMaxHorizontalScrollOffset;
     }
 
     public int computeMaximumHorizontalScrollOffset() {
-        return computeHorizontalScrollRange() - mContainerViewWidth;
+        return mMaxHorizontalScrollOffset;
     }
 
     public int computeHorizontalScrollOffset() {
@@ -85,11 +95,11 @@ public class AwScrollOffsetManager {
     }
 
     public int computeVerticalScrollRange() {
-        return Math.max(mContainerViewHeight, mContentHeight);
+        return mContainerViewHeight + mMaxVerticalScrollOffset;
     }
 
     public int computeMaximumVerticalScrollOffset() {
-        return computeVerticalScrollRange() - mContainerViewHeight;
+        return mMaxVerticalScrollOffset;
     }
 
     public int computeVerticalScrollOffset() {
@@ -101,12 +111,10 @@ public class AwScrollOffsetManager {
     }
 
     //---------------------------------------------------------------------------------------------
-
-    // Called when the content size changes. This needs to be the size of the on-screen content and
-    // therefore we can't use the WebContentsDelegate preferred size.
-    public void setContentSize(int width, int height) {
-        mContentWidth = width;
-        mContentHeight = height;
+    // Called when the scroll range changes. This needs to be the size of the on-screen content.
+    public void setMaxScrollOffset(int width, int height) {
+        mMaxHorizontalScrollOffset = width;
+        mMaxVerticalScrollOffset = height;
     }
 
     // Called when the physical size of the view changes.
@@ -132,7 +140,7 @@ public class AwScrollOffsetManager {
         }
     }
 
-    // Called by the native side to attempt to scroll the container view.
+    // Called by the native side to scroll the container view.
     public void scrollContainerViewTo(int x, int y) {
         mNativeScrollX = x;
         mNativeScrollY = y;
@@ -148,6 +156,10 @@ public class AwScrollOffsetManager {
         // method for handling both over-scroll as well as in-bounds scroll.
         mDelegate.overScrollContainerViewBy(deltaX, deltaY, scrollX, scrollY,
                 scrollRangeX, scrollRangeY, mProcessingTouchEvent);
+    }
+
+    public boolean isFlingActive() {
+        return mFlinging;
     }
 
     // Called by the native side to over-scroll the container view.
@@ -258,29 +270,33 @@ public class AwScrollOffsetManager {
     public void flingScroll(int velocityX, int velocityY) {
         final int scrollX = mDelegate.getContainerViewScrollX();
         final int scrollY = mDelegate.getContainerViewScrollY();
-        final int rangeX = computeMaximumHorizontalScrollOffset();
-        final int rangeY = computeMaximumVerticalScrollOffset();
+        final int scrollRangeX = computeMaximumHorizontalScrollOffset();
+        final int scrollRangeY = computeMaximumVerticalScrollOffset();
 
         mScroller.fling(scrollX, scrollY, velocityX, velocityY,
-                0, rangeX, 0, rangeY);
+                0, scrollRangeX, 0, scrollRangeY);
+        mFlinging = true;
         mDelegate.invalidate();
     }
 
     // Called immediately before the draw to update the scroll offset.
     public void computeScrollAndAbsorbGlow(OverScrollGlow overScrollGlow) {
         final boolean stillAnimating = mScroller.computeScrollOffset();
-        if (!stillAnimating) return;
+        if (!stillAnimating) {
+            mFlinging = false;
+            return;
+        }
 
         final int oldX = mDelegate.getContainerViewScrollX();
         final int oldY = mDelegate.getContainerViewScrollY();
         int x = mScroller.getCurrX();
         int y = mScroller.getCurrY();
 
-        int rangeX = computeMaximumHorizontalScrollOffset();
-        int rangeY = computeMaximumVerticalScrollOffset();
+        final int scrollRangeX = computeMaximumHorizontalScrollOffset();
+        final int scrollRangeY = computeMaximumVerticalScrollOffset();
 
         if (overScrollGlow != null) {
-            overScrollGlow.absorbGlow(x, y, oldX, oldY, rangeX, rangeY,
+            overScrollGlow.absorbGlow(x, y, oldX, oldY, scrollRangeX, scrollRangeY,
                     mScroller.getCurrVelocity());
         }
 
@@ -289,5 +305,131 @@ public class AwScrollOffsetManager {
         scrollBy(x - oldX, y - oldY);
 
         mDelegate.invalidate();
+    }
+
+    private static int computeDurationInMilliSec(int dx, int dy) {
+        int distance = Math.max(Math.abs(dx), Math.abs(dy));
+        int duration = distance * 1000 / STD_SCROLL_ANIMATION_SPEED_PIX_PER_SEC;
+        return Math.min(duration, MAX_SCROLL_ANIMATION_DURATION_MILLISEC);
+    }
+
+    private boolean animateScrollTo(int x, int y) {
+        final int scrollX = mDelegate.getContainerViewScrollX();
+        final int scrollY = mDelegate.getContainerViewScrollY();
+
+        x = clampHorizontalScroll(x);
+        y = clampVerticalScroll(y);
+
+        int dx = x - scrollX;
+        int dy = y - scrollY;
+
+        if (dx == 0 && dy == 0)
+            return false;
+
+        mScroller.startScroll(scrollX, scrollY, dx, dy, computeDurationInMilliSec(dx, dy));
+        mDelegate.invalidate();
+
+        return true;
+    }
+
+    /**
+     * See {@link WebView#pageUp(boolean)}
+     */
+    public boolean pageUp(boolean top) {
+        final int scrollX = mDelegate.getContainerViewScrollX();
+        final int scrollY = mDelegate.getContainerViewScrollY();
+
+        if (top) {
+            // go to the top of the document
+            return animateScrollTo(scrollX, 0);
+        }
+        int dy = -mContainerViewHeight / 2;
+        if (mContainerViewHeight > 2 * PAGE_SCROLL_OVERLAP) {
+            dy = -mContainerViewHeight + PAGE_SCROLL_OVERLAP;
+        }
+        // animateScrollTo clamps the argument to the scrollable range so using (scrollY + dy) is
+        // fine.
+        return animateScrollTo(scrollX, scrollY + dy);
+    }
+
+    /**
+     * See {@link WebView#pageDown(boolean)}
+     */
+    public boolean pageDown(boolean bottom) {
+        final int scrollX = mDelegate.getContainerViewScrollX();
+        final int scrollY = mDelegate.getContainerViewScrollY();
+
+        if (bottom) {
+            return animateScrollTo(scrollX, computeVerticalScrollRange());
+        }
+        int dy = mContainerViewHeight / 2;
+        if (mContainerViewHeight > 2 * PAGE_SCROLL_OVERLAP) {
+            dy = mContainerViewHeight - PAGE_SCROLL_OVERLAP;
+        }
+        // animateScrollTo clamps the argument to the scrollable range so using (scrollY + dy) is
+        // fine.
+        return animateScrollTo(scrollX, scrollY + dy);
+    }
+
+    /**
+     * See {@link WebView#requestChildRectangleOnScreen(View, Rect, boolean)}
+     */
+    public boolean requestChildRectangleOnScreen(int childOffsetX, int childOffsetY, Rect rect,
+            boolean immediate) {
+        // TODO(mkosiba): WebViewClassic immediately returns false if a zoom animation is
+        // in progress. We currently can't tell if one is happening.. should we instead cancel any
+        // scroll animation when the size/pageScaleFactor changes?
+
+        // TODO(mkosiba): Take scrollbar width into account in the screenRight/screenBotton
+        // calculations. http://crbug.com/269032
+
+        final int scrollX = mDelegate.getContainerViewScrollX();
+        final int scrollY = mDelegate.getContainerViewScrollY();
+
+        rect.offset(childOffsetX, childOffsetY);
+
+        int screenTop = scrollY;
+        int screenBottom = scrollY + mContainerViewHeight;
+        int scrollYDelta = 0;
+
+        if (rect.bottom > screenBottom) {
+            int oneThirdOfScreenHeight = mContainerViewHeight / 3;
+            if (rect.width() > 2 * oneThirdOfScreenHeight) {
+                // If the rectangle is too tall to fit in the bottom two thirds
+                // of the screen, place it at the top.
+                scrollYDelta = rect.top - screenTop;
+            } else {
+                // If the rectangle will still fit on screen, we want its
+                // top to be in the top third of the screen.
+                scrollYDelta = rect.top - (screenTop + oneThirdOfScreenHeight);
+            }
+        } else if (rect.top < screenTop) {
+            scrollYDelta = rect.top - screenTop;
+        }
+
+        int screenLeft = scrollX;
+        int screenRight = scrollX + mContainerViewWidth;
+        int scrollXDelta = 0;
+
+        if (rect.right > screenRight && rect.left > screenLeft) {
+            if (rect.width() > mContainerViewWidth) {
+                scrollXDelta += (rect.left - screenLeft);
+            } else {
+                scrollXDelta += (rect.right - screenRight);
+            }
+        } else if (rect.left < screenLeft) {
+            scrollXDelta -= (screenLeft - rect.left);
+        }
+
+        if (scrollYDelta == 0 && scrollXDelta == 0) {
+            return false;
+        }
+
+        if (immediate) {
+            scrollBy(scrollXDelta, scrollYDelta);
+            return true;
+        } else {
+            return animateScrollTo(scrollX + scrollXDelta, scrollY + scrollYDelta);
+        }
     }
 }
